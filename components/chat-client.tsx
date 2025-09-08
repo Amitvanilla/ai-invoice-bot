@@ -1198,6 +1198,7 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
               </div>
             )}
           </div>
+          </div>
         )}
 
         {/* PDF Viewer Modal */}

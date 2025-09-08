@@ -1,0 +1,226 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/db";
+import fs from "fs";
+import path from "path";
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  try {
+    // Get user from database
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email }
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Get the invoice
+    console.log('Looking for invoice:', {
+      invoiceId: params.id,
+      userId: user.id,
+      userEmail: user.email
+    });
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: params.id, userId: user.id }
+    });
+
+    if (!invoice) {
+      console.log('Invoice not found, checking all invoices for user...');
+      const allUserInvoices = await prisma.invoice.findMany({
+        where: { userId: user.id }
+      });
+      console.log('User has invoices:', allUserInvoices.map(inv => ({ id: inv.id, filename: inv.filename })));
+
+      return NextResponse.json({
+        error: "Invoice not found",
+        invoiceId: params.id,
+        userId: user.id,
+        availableInvoices: allUserInvoices.length
+      }, { status: 404 });
+    }
+
+    console.log('Found invoice:', { id: invoice.id, filename: invoice.filename });
+
+    // Get the file type from query parameters
+    const url = new URL(request.url);
+    const type = url.searchParams.get('type');
+
+    if (!type || !['original', 'processed'].includes(type)) {
+      return NextResponse.json({ error: "Invalid file type. Use 'original' or 'processed'" }, { status: 400 });
+    }
+
+    let filePath: string;
+    let fileName: string;
+    let contentType: string;
+
+    if (type === 'original') {
+      // Serve original PDF files from the originals directory
+      try {
+        const originalsDir = path.join(process.cwd(), 'invoice-service', 'originals');
+        const originalFiles = fs.readdirSync(originalsDir);
+
+        // Look for a file that matches the invoice filename
+        console.log('Looking for files containing:', invoice.filename.replace('.pdf', ''));
+        console.log('Available files:', originalFiles);
+
+        const matchingFile = originalFiles.find(file => {
+          const fileBaseName = file.replace('.pdf', '').split('_').pop(); // Get the filename part after the UUID
+          const invoiceBaseName = invoice.filename.replace('.pdf', '');
+          return fileBaseName === invoiceBaseName;
+        });
+
+        console.log('Matching file found:', matchingFile);
+
+        let finalFile = matchingFile;
+
+        // If no exact match, try to find any file containing the invoice filename
+        if (!finalFile) {
+          console.log('No exact match found, trying partial match...');
+          finalFile = originalFiles.find(file =>
+            file.includes(invoice.filename.replace('.pdf', ''))
+          );
+          console.log('Partial match found:', finalFile);
+        }
+
+        if (!finalFile) {
+          console.log('Available original files:', originalFiles);
+          console.log('Looking for:', invoice.filename);
+          return NextResponse.json({
+            error: "Original file not found",
+            message: "The original PDF file could not be located",
+            filename: invoice.filename,
+            availableFiles: originalFiles.length
+          }, { status: 404 });
+        }
+
+        const filePath = path.join(originalsDir, finalFile);
+        console.log('Serving original file:', filePath);
+
+        // Read the PDF file
+        const fileBuffer = fs.readFileSync(filePath);
+
+        return new NextResponse(fileBuffer, {
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition': `inline; filename="${invoice.filename}"`
+          }
+        });
+
+      } catch (error) {
+        console.error('Error serving original file:', error);
+        return NextResponse.json({ error: "Failed to access original file" }, { status: 500 });
+      }
+
+    } else {
+      // For processed file, try to get the Excel from Python service
+      try {
+        const pythonServiceUrl = process.env.INVOICE_SERVICE_URL || 'http://localhost:8081';
+
+        // Request the processed Excel file from Python service
+        const response = await fetch(`${pythonServiceUrl}/last-processed-invoices`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${process.env.INVOICE_SERVICE_API_KEY || 'your-invoice-service-api-key-here'}`
+          }
+        });
+
+        if (!response.ok) {
+          // If Python service is not available, return a message
+          return NextResponse.json({
+            error: "Processed Excel not available",
+            message: "The Excel file is generated by the AI service and stored remotely",
+            status: "processed"
+          }, { status: 404 });
+        }
+
+        // Check if it's a file response
+        const contentType = response.headers.get('content-type');
+
+        if (contentType?.includes('spreadsheet') || contentType?.includes('application/vnd.openxmlformats')) {
+          // Get the file content
+          const fileBuffer = await response.arrayBuffer();
+          const bufferSize = fileBuffer.byteLength;
+
+          console.log(`Excel file size: ${bufferSize} bytes`);
+
+          // Check if file is too small (likely corrupted)
+          if (bufferSize < 1000) {
+            console.error('Excel file too small, likely corrupted');
+            return NextResponse.json({
+              error: "Excel file corrupted",
+              message: "The generated Excel file appears to be corrupted. Please try uploading the invoice again.",
+              fileSize: bufferSize
+            }, { status: 500 });
+          }
+
+          // Return the Excel file with proper headers
+          return new NextResponse(fileBuffer, {
+            headers: {
+              'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              'Content-Disposition': `attachment; filename="invoice_analysis_${invoice.id}.xlsx"`,
+              'Content-Length': bufferSize.toString(),
+              'Cache-Control': 'no-cache'
+            }
+          });
+        } else {
+          // Try to get the response as text to see what we got
+          const responseText = await response.text();
+          console.log('Non-file response:', responseText.substring(0, 200));
+
+          return NextResponse.json({
+            error: "Excel file not available",
+            message: "The processed Excel file is not ready yet or the service returned an unexpected response",
+            contentType: contentType,
+            responsePreview: responseText.substring(0, 100)
+          }, { status: 404 });
+        }
+
+      } catch (error) {
+        console.error('Error fetching processed file:', error);
+
+        // Try to serve the local Excel file as fallback
+        try {
+          const localExcelPath = path.join(process.cwd(), 'invoice-service', 'exports', 'invoice_analysis.xlsx');
+
+          if (fs.existsSync(localExcelPath)) {
+            console.log('Serving local Excel file as fallback');
+            const localFileBuffer = fs.readFileSync(localExcelPath);
+            const localFileSize = localFileBuffer.length;
+
+            if (localFileSize > 1000) {
+              return new NextResponse(localFileBuffer, {
+                headers: {
+                  'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                  'Content-Disposition': `attachment; filename="invoice_analysis_fallback.xlsx"`,
+                  'Content-Length': localFileSize.toString(),
+                  'Cache-Control': 'no-cache'
+                }
+              });
+            }
+          }
+        } catch (fallbackError) {
+          console.error('Fallback Excel also failed:', fallbackError);
+        }
+
+        return NextResponse.json({
+          error: "Failed to fetch processed file",
+          details: "The AI service may not be running or the file is not available"
+        }, { status: 500 });
+      }
+    }
+
+  } catch (error) {
+    console.error("Download error:", error);
+    return NextResponse.json({ error: "Download failed" }, { status: 500 });
+  }
+}

@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
     const pythonFormData = new FormData();
     const pythonFile = new File([buffer], file.name, { type: file.type });
     pythonFormData.append('pdf_files', pythonFile);
+    pythonFormData.append('invoice_id', invoice.id); // Pass the invoice ID to Python service
 
     try {
       // Call Python invoice processing service
@@ -88,12 +89,65 @@ export async function POST(request: NextRequest) {
           console.log('🔍 Upload: Looking for logs in:', logDir);
           console.log('🔍 Upload: Current working directory:', process.cwd());
 
-          const logFiles = fs.readdirSync(logDir).filter(file => file.includes('processed_data.json')).sort().reverse();
-          console.log('🔍 Upload: Found log files:', logFiles.slice(0, 3));
+          // Wait for the Python service to process the file with retry mechanism
+          let processedDataFile = null;
+          let attempts = 0;
+          const maxAttempts = 8;
+          
+          while (attempts < maxAttempts && !processedDataFile) {
+            await new Promise(resolve => setTimeout(resolve, 3000 + (attempts * 1000))); // 3s, 4s, 5s, etc.
+            attempts++;
+            
+            console.log(`🔍 Upload: Attempt ${attempts}/${maxAttempts} - Looking for processed data...`);
+            
+            const logFiles = fs.readdirSync(logDir).filter(file => file.includes('processed_data.json')).sort().reverse();
+            console.log('🔍 Upload: Found log files:', logFiles.slice(0, 3));
 
-          if (logFiles.length > 0) {
-            const latestLogFile = path.join(logDir, logFiles[0]);
-            const processedData = JSON.parse(fs.readFileSync(latestLogFile, 'utf8'));
+            // Try to find the specific processed data file for this upload
+            const baseFilename = originalname.replace('.pdf', '');
+            console.log('🔍 Upload: Looking for filename:', baseFilename);
+            console.log('🔍 Upload: Available log files:', logFiles.map(f => f.substring(0, 50) + '...'));
+            
+            // Try multiple matching strategies
+            let matchingFile = logFiles.find(file => file.includes(baseFilename));
+            
+            if (!matchingFile) {
+              // Try without the 'input_' prefix
+              const filenameWithoutInput = baseFilename.replace('input_', '');
+              matchingFile = logFiles.find(file => file.includes(filenameWithoutInput));
+              console.log('🔍 Upload: Trying without input_ prefix:', filenameWithoutInput);
+            }
+            
+            if (!matchingFile) {
+              // Try with just the core filename (remove any UUIDs or timestamps)
+              const coreFilename = baseFilename.split('_').pop() || baseFilename;
+              matchingFile = logFiles.find(file => file.includes(coreFilename));
+              console.log('🔍 Upload: Trying core filename:', coreFilename);
+            }
+            
+            if (matchingFile) {
+              processedDataFile = path.join(logDir, matchingFile);
+              console.log('✅ Found matching processed data file:', matchingFile);
+              break; // Exit the retry loop
+            } else if (logFiles.length > 0) {
+              // Fallback to the most recent file
+              processedDataFile = path.join(logDir, logFiles[0]);
+              console.log('⚠️ No matching file found, using latest:', logFiles[0]);
+              break; // Exit the retry loop
+            } else {
+              console.log(`⚠️ No processed data files found yet, attempt ${attempts}/${maxAttempts}`);
+            }
+          }
+
+          if (processedDataFile && fs.existsSync(processedDataFile)) {
+            const fileContent = fs.readFileSync(processedDataFile, 'utf8');
+            if (!fileContent.trim()) {
+              throw new Error('Processed data file is empty');
+            }
+            
+            const processedData = JSON.parse(fileContent);
+            console.log('✅ Successfully loaded processed data from:', processedDataFile);
+            console.log('🔍 Processed data keys:', Object.keys(processedData));
 
             // Extract vendor info
             const vendorInfo = processedData.vendor_info?.[0]?.data || '';

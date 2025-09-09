@@ -33,11 +33,14 @@ export const authConfig: NextAuthConfig = {
         const password = creds?.password as string;
 
         // Temporary fallback for demo purposes
-        if (email === "demo@chat.app" && password === "demo1234") {
+        const demoEmail = process.env.DEMO_EMAIL || "demo@chat.app";
+        const demoPassword = process.env.DEMO_PASSWORD || "demo1234";
+        
+        if (email === demoEmail && password === demoPassword) {
           return {
             id: "demo-user-id",
             name: "Demo User",
-            email: "demo@chat.app"
+            email: demoEmail
           };
         }
 

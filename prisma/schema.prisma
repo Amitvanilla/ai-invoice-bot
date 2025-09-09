@@ -8,21 +8,19 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  name          String?
-  email         String   @unique
-  emailVerified DateTime?
-  image         String?
-  passwordHash  String?
-
+  id              String          @id @default(cuid())
+  name            String?
+  email           String          @unique
+  emailVerified   DateTime?
+  image           String?
+  passwordHash    String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
   accounts        Account[]
-  sessions        Session[]
   chats           ChatSession[]
   invoices        Invoice[]
   invoiceSearches InvoiceSearch[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  sessions        Session[]
 }
 
 model Account {
@@ -38,8 +36,7 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -49,8 +46,7 @@ model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model VerificationToken {
@@ -62,44 +58,35 @@ model VerificationToken {
 }
 
 model ChatSession {
-  id        String   @id @default(cuid())
-  title     String   @default("New chat")
+  id        String    @id @default(cuid())
+  title     String    @default("New chat")
   userId    String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  Message[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Message {
-  id          String      @id @default(cuid())
-  role        MessageRole
-  content     String
-  chatId      String
-  createdAt   DateTime @default(now())
-
-  chat ChatSession @relation(fields: [chatId], references: [id], onDelete: Cascade)
-}
-
-enum MessageRole {
-  user
-  assistant
-  system
+  id        String      @id @default(cuid())
+  role      MessageRole
+  content   String
+  chatId    String
+  createdAt DateTime    @default(now())
+  chat      ChatSession @relation(fields: [chatId], references: [id], onDelete: Cascade)
 }
 
 model Invoice {
-  id              String   @id @default(cuid())
-  userId          String
-  filename        String
-  extractedData   Json?
-  classifiedData  Json?
-  embeddings      String?  // Store as JSON string for now, can be upgraded to vector later
-  status          String   @default("processing")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String   @id @default(cuid())
+  userId         String
+  filename       String
+  extractedData  Json?
+  classifiedData Json?
+  embeddings     String?
+  status         String   @default("processing")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([status])
@@ -107,14 +94,19 @@ model Invoice {
 }
 
 model InvoiceSearch {
-  id            String   @id @default(cuid())
-  userId        String
-  query         String
-  results       Json     // Store search results
-  createdAt     DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(cuid())
+  userId    String
+  query     String
+  results   Json
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([createdAt])
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
 }

@@ -2,13 +2,19 @@
 import { useEffect, useRef, useState } from "react";
 import { Message, ChatSession } from "@prisma/client";
 import { Plus, MessageSquare, Trash2, MoreHorizontal, LogOut, Search, BookOpen, User, Mic, MicOff, Bot, Upload, FileText, Download, Eye } from "lucide-react";
+import InvoiceParserIcon from "./invoice-parser-icon";
+import { useSession, signIn, signOut } from "next-auth/react";
 import dynamic from 'next/dynamic';
 
 const PDFViewerModal = dynamic(() => import('./pdf-viewer-modal'), {
   ssr: false,
   loading: () => null
 });
-import { useSession, signIn, signOut } from "next-auth/react";
+
+const ExcelViewerModal = dynamic(() => import('./excel-viewer-modal'), {
+  ssr: false,
+  loading: () => null
+});
 
 export default function ChatClient({ initialChats }:{ initialChats: (ChatSession & {messages: Message[]})[]}){
   const [chats, setChats] = useState(initialChats);
@@ -45,11 +51,14 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfFilename, setPdfFilename] = useState('');
 
-  // Load dashboard data
-  const loadDashboardData = async () => {
-    if (dashboardData) return; // Don't reload if already loaded
+  // Excel Viewer Modal state
+  const [excelModalOpen, setExcelModalOpen] = useState(false);
+  const [excelUrl, setExcelUrl] = useState<string | null>(null);
+  const [excelFilename, setExcelFilename] = useState('');
 
-    setLoadingDashboard(true);
+    // Load dashboard data
+    const loadDashboardData = async () => {
+      setLoadingDashboard(true);
     try {
       const response = await fetch('/api/dashboard');
       if (response.ok) {
@@ -455,8 +464,9 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
 
   const viewOriginalPDF = async (invoiceId: string) => {
     try {
-      console.log('Viewing PDF for invoice:', invoiceId);
-      console.log('Current session:', session);
+      console.log('🔍 Viewing PDF for invoice:', invoiceId);
+      console.log('🔍 Current session:', session);
+      console.log('🔍 Available invoices:', invoices.length);
 
       if (!session) {
         alert('Please log in to view PDFs');
@@ -467,21 +477,72 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
       const invoice = invoices.find(inv => inv.id === invoiceId);
       const filename = invoice?.filename || `invoice_${invoiceId}.pdf`;
 
-      console.log('Found invoice:', invoice);
-      console.log('PDF filename:', filename);
+      console.log('🔍 Found invoice:', invoice);
+      console.log('🔍 PDF filename:', filename);
 
       // Set PDF URL and open modal
       const pdfUrl = `/api/invoices/${invoiceId}/download?type=original`;
-      console.log('PDF URL:', pdfUrl);
+      console.log('🔍 PDF URL:', pdfUrl);
 
       setPdfUrl(pdfUrl);
       setPdfFilename(filename);
       setPdfModalOpen(true);
 
-      console.log('PDF modal opened for:', filename);
+      console.log('✅ PDF modal opened for:', filename);
+      console.log('✅ PDF modal state:', { pdfModalOpen: true, pdfUrl, pdfFilename: filename });
+      
+      // Test the URL accessibility
+      try {
+        const testResponse = await fetch(pdfUrl, { method: 'HEAD' });
+        console.log('🔍 PDF URL test response:', testResponse.status, testResponse.statusText);
+      } catch (testError) {
+        console.error('🔍 PDF URL test failed:', testError);
+      }
     } catch (error) {
-      console.error('PDF view failed:', error);
+      console.error('❌ PDF view failed:', error);
       alert('Failed to open PDF viewer. Please check the console for details.');
+    }
+  };
+
+  const viewProcessedExcel = async (invoiceId: string) => {
+    try {
+      console.log('🔍 Viewing Excel for invoice:', invoiceId);
+      console.log('🔍 Current session:', session);
+      console.log('🔍 Available invoices:', invoices.length);
+
+      if (!session) {
+        alert('Please log in to view Excel files');
+        return;
+      }
+
+      // Find the invoice to get filename
+      const invoice = invoices.find(inv => inv.id === invoiceId);
+      const filename = invoice?.filename?.replace('.pdf', '.xlsx') || `invoice_analysis_${invoiceId}.xlsx`;
+
+      console.log('🔍 Found invoice:', invoice);
+      console.log('🔍 Excel filename:', filename);
+
+      // Set Excel URL and open modal
+      const excelUrl = `/api/invoices/${invoiceId}/download?type=processed`;
+      console.log('🔍 Excel URL:', excelUrl);
+
+      setExcelUrl(excelUrl);
+      setExcelFilename(filename);
+      setExcelModalOpen(true);
+
+      console.log('✅ Excel modal opened for:', filename);
+      console.log('✅ Excel modal state:', { excelModalOpen: true, excelUrl, excelFilename: filename });
+      
+      // Test the URL accessibility
+      try {
+        const testResponse = await fetch(excelUrl, { method: 'HEAD' });
+        console.log('🔍 Excel URL test response:', testResponse.status, testResponse.statusText);
+      } catch (testError) {
+        console.error('🔍 Excel URL test failed:', testError);
+      }
+    } catch (error) {
+      console.error('❌ Excel view failed:', error);
+      alert('Failed to open Excel viewer. Please check the console for details.');
     }
   };
 
@@ -513,12 +574,12 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
         {/* Logo and Collapse/Expand Button */}
         <div className="px-4 py-3 flex justify-between items-center">
           {/* Logo */}
-          <div className={`flex items-center ${sidebarCollapsed ? 'hidden' : ''}`}>
-            <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center mr-3">
-              <span className="text-white font-bold text-lg">A</span>
+            <div className={`flex items-center ${sidebarCollapsed ? 'hidden' : ''}`}>
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center mr-3">
+                <InvoiceParserIcon className="w-5 h-5 text-white" />
+              </div>
+              <span className="text-lg font-semibold text-gray-900">Invoice Parser</span>
             </div>
-            <span className="text-lg font-semibold text-gray-900">Amit Chat</span>
-          </div>
 
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -689,7 +750,7 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
                   <div className="text-sm font-medium text-gray-900 truncate">
                     {session?.user?.name || 'User'}
                   </div>
-                  <div className="text-xs text-gray-700">Free</div>
+                  {/* <div className="text-xs text-gray-700">Free</div> */}
                 </div>
               )}
             </button>
@@ -745,9 +806,9 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col bg-white overflow-x-hidden">
-        {/* Tab Navigation */}
-        <div className="border-b border-gray-200 bg-white">
+        <main className="flex-1 flex flex-col bg-white overflow-x-hidden">
+          {/* Tab Navigation */}
+          <div className="border-b border-gray-200 bg-white sticky top-0 z-40">
           <div className="px-6 py-3">
             <div className="flex space-x-8">
               <button
@@ -803,9 +864,9 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
 
         {/* Tab Content */}
         {activeTab === 'chat' && (
-          <>
-            {/* Chat Header */}
-            <div className="border-b border-gray-200 px-6 py-3 bg-white">
+            <>
+              {/* Chat Header */}
+              <div className="border-b border-gray-200 px-6 py-3 bg-white sticky top-16 z-30">
               <h1 className="text-xl font-semibold text-gray-900">
                 {current?.title || "Select a chat"}
               </h1>
@@ -815,11 +876,11 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
         <div className="flex-1 overflow-y-auto px-32 py-24 space-y-4 bg-white">
           {!current ? (
             <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-medium text-gray-900 mb-2">Welcome to Amit Chat</h3>
-                <p className="text-base text-gray-500">Select a chat from the sidebar or start a new conversation</p>
-              </div>
+                <div className="text-center">
+                  <MessageSquare className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-xl font-medium text-gray-900 mb-2">Welcome to Invoice Parser</h3>
+                  <p className="text-base text-gray-500">Select a chat from the sidebar or start a new conversation</p>
+                </div>
             </div>
           ) : current.messages.length === 0 ? (
             <div className="flex items-center justify-center h-full">
@@ -870,7 +931,7 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
               <input
                 value={input}
                 onChange={e=>setInput(e.target.value)}
-                placeholder="Message ChatGPT..."
+                placeholder="Ask about your invoices..."
                 disabled={isStreaming}
                 className="flex-1 bg-transparent text-base focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed resize-none text-gray-900 placeholder-gray-500"
                 onKeyDown={(e) => {
@@ -923,79 +984,97 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
             Press Enter to send, Shift + Enter for new line
           </p> */}
         </div>
+        
+        
         </>
         )}
 
         {activeTab === 'invoices' && (
           /* Invoice Management Tab */
-          <div className="flex-1 flex flex-col">
-            {/* Invoice Header - Matching Chat Window Style */}
-            <div className="border-b border-gray-200 bg-white">
-              <div className="px-6 py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-blue-600" />
-                    <h1 className="text-lg font-semibold text-gray-900">Invoice Management</h1>
+            <div className="flex-1 flex flex-col bg-gray-50">
+              {/* Invoice Header - Matching Chat Window Style */}
+              <div className="border-b border-gray-200 bg-white sticky top-16 z-30 shadow-sm">
+                <div className="px-6 py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <FileText className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <div>
+                        <h1 className="text-xl font-semibold text-gray-900">Invoice Management</h1>
+                        {/* <p className="text-sm text-gray-500">Upload and manage your invoices</p> */}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {/* Search */}
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search invoices..."
+                          value={invoiceSearchQuery}
+                          onChange={(e) => setInvoiceSearchQuery(e.target.value)}
+                          className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-64"
+                        />
+                      </div>
+                      {/* Upload Button */}
+                      <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer transition-colors shadow-sm">
+                        <Upload className="w-4 h-4" />
+                        Upload Invoice
+                        <input
+                          type="file"
+                          accept=".pdf,.jpg,.jpeg,.png"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              try {
+                                await uploadInvoice(file);
+                                fetchInvoices(); // Refresh the list
+                              } catch (error) {
+                                alert('Upload failed: ' + error.message);
+                              }
+                            }
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                  {/* Search */}
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Search invoices..."
-                      value={invoiceSearchQuery}
-                      onChange={(e) => setInvoiceSearchQuery(e.target.value)}
-                      className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                  </div>
-                  {/* Upload Button */}
-                  <label className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 cursor-pointer transition-colors">
-                    <Upload className="w-4 h-4" />
-                    Upload Invoice
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          try {
-                            await uploadInvoice(file);
-                            fetchInvoices(); // Refresh the list
-                          } catch (error) {
-                            alert('Upload failed: ' + error.message);
-                          }
-                        }
-                      }}
-                      className="hidden"
-                    />
-                  </label>
                 </div>
               </div>
-            </div>
 
             {/* Invoice Table */}
-            <div className="flex-1 overflow-x-hidden overflow-y-auto px-6 py-4">
-              <div className="bg-white rounded-lg border border-gray-200 w-full">
-                <div className="px-6 py-4 border-b border-gray-200">
-                  <h2 className="text-lg font-medium text-gray-900">Processed Invoices</h2>
-                  <p className="text-sm text-gray-500">Manage and search through your uploaded invoices</p>
+            <div className="flex-1 overflow-x-hidden overflow-y-auto p-6">
+              <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">Processed Invoices</h2>
+                      <p className="text-sm text-gray-500 mt-1">Manage and search through your uploaded invoices</p>
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {invoices.length} {invoices.length === 1 ? 'invoice' : 'invoices'}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="overflow-x-auto w-full">
+                <div className="overflow-x-auto">
                   <table className="w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/2">
-                          Filename
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4" />
+                            Invoice Details
+                          </div>
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                           Status
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/4">
+                        <th className="px-6 py-4 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                           Upload Date
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-1/6">
+                        <th className="px-6 py-4 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">
                           Actions
                         </th>
                       </tr>
@@ -1027,48 +1106,74 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
                         </tr>
                       ) : (
                         invoices.map((invoice) => (
-                          <tr key={invoice.id} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 w-1/2">
-                              <div className="flex items-center">
-                                <FileText className="w-5 h-5 text-gray-400 mr-3 flex-shrink-0" />
+                          <tr key={invoice.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-6 py-4">
+                              <div className="flex items-start gap-3">
+                                <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <FileText className="w-5 h-5 text-blue-600" />
+                                </div>
                                 <div className="min-w-0 flex-1">
                                   <button
                                     onClick={() => viewOriginalPDF(invoice.id)}
-                                    className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline text-left block truncate"
+                                    className="text-sm font-semibold text-gray-900 hover:text-blue-600 hover:underline text-left block truncate"
                                     title={invoice.filename}
                                   >
                                     {invoice.filename}
                                   </button>
-                                  <div className="text-sm text-gray-500 truncate">
-                                    {invoice.extracted_data?.invoice_number || (invoice.status === 'processing' ? 'Processing...' : 'N/A')}
+                                  <div className="text-sm text-gray-500 mt-1">
+                                    Invoice #{invoice.extracted_data?.invoice_number || (invoice.status === 'processing' ? 'Processing...' : 'N/A')}
                                   </div>
+                                  {invoice.extracted_data?.vendor_name && (
+                                    <div className="text-xs text-gray-400 mt-1">
+                                      Vendor: {invoice.extracted_data.vendor_name}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </td>
-                            <td className="px-6 py-4 w-1/6">
-                              <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                invoice.status === 'processed'
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-yellow-100 text-yellow-800'
-                              }`}>
-                                {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
-                              </span>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col gap-1">
+                                <span className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full w-fit ${
+                                  invoice.status === 'processed'
+                                    ? 'bg-green-100 text-green-800'
+                                    : 'bg-yellow-100 text-yellow-800'
+                                }`}>
+                                  {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
+                                </span>
+                                {/* {invoice.extracted_data?.total_amount && (
+                                  <span className="text-xs text-gray-500">
+                                    ₹{invoice.extracted_data.total_amount}
+                                  </span>
+                                )} */}
+                              </div>
                             </td>
-                            <td className="px-6 py-4 w-1/4 text-sm text-gray-500">
-                              {new Date(invoice.created_at).toLocaleDateString()}
+                            <td className="px-6 py-4">
+                              <div className="text-sm text-gray-900">
+                                {new Date(invoice.created_at).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric'
+                                })}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                {new Date(invoice.created_at).toLocaleTimeString('en-US', {
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </div>
                             </td>
-                            <td className="px-6 py-4 w-1/6 text-sm font-medium">
+                            <td className="px-6 py-4">
                               <div className="flex items-center gap-2 justify-center">
                                 <button
-                                  onClick={() => viewOriginalPDF(invoice.id)}
-                                  className="text-blue-600 hover:text-blue-900 p-1"
-                                  title="View Original PDF Document"
+                                  onClick={() => viewProcessedExcel(invoice.id)}
+                                  className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors"
+                                  title="View Excel Analysis Report"
                                 >
                                   <Eye className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => downloadProcessedExcel(invoice.id)}
-                                  className="text-green-600 hover:text-green-900 p-1"
+                                  className="p-2 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
                                   title="Download Excel (Analysis Report)"
                                 >
                                   <Download className="w-4 h-4" />
@@ -1198,7 +1303,6 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
               </div>
             )}
           </div>
-          </div>
         )}
 
         {/* PDF Viewer Modal */}
@@ -1219,19 +1323,37 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
           }}
         />
 
+        {/* Excel Viewer Modal */}
+        <ExcelViewerModal
+          isOpen={excelModalOpen}
+          onClose={() => setExcelModalOpen(false)}
+          excelUrl={excelUrl}
+          filename={excelFilename}
+          onDownload={() => {
+            if (excelUrl) {
+              const link = document.createElement('a');
+              link.href = excelUrl;
+              link.download = excelFilename;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }
+          }}
+        />
+
         {activeTab === 'integrations' && (
           /* Integrations Tab */
-          <div className="flex-1 flex flex-col">
-            {/* Integration Header - Matching Chat Window Style */}
-            <div className="border-b border-gray-200 bg-white">
-              <div className="px-6 py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    <h1 className="text-lg font-semibold text-gray-900">Integrations</h1>
-                  </div>
+            <div className="flex-1 flex flex-col">
+              {/* Integration Header - Matching Chat Window Style */}
+              <div className="border-b border-gray-200 bg-white sticky top-16 z-30">
+                <div className="px-6 py-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                      </svg>
+                      <h1 className="text-xl font-semibold text-gray-900">Integrations</h1>
+                    </div>
                   <div className="text-sm text-gray-500">
                     Connect your accounts to automatically sync invoices
                   </div>
@@ -1465,17 +1587,17 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
 
         {activeTab === 'dashboard' && (
           /* Dashboard Tab */
-          <div className="flex-1 flex flex-col">
-            {/* Dashboard Header - Matching Chat Window Style */}
-            <div className="border-b border-gray-200 bg-white">
-              <div className="px-6 py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
-                    <h1 className="text-lg font-semibold text-gray-900">Expense Dashboard</h1>
-                  </div>
+            <div className="flex-1 flex flex-col">
+              {/* Dashboard Header - Matching Chat Window Style */}
+              <div className="border-b border-gray-200 bg-white sticky top-16 z-30">
+                <div className="px-6 py-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                      </svg>
+                      <h1 className="text-xl font-semibold text-gray-900">Expense Dashboard</h1>
+                    </div>
                   <div className="text-sm text-gray-500">
                     Track your invoice spending and vendor analytics
                   </div>
@@ -1485,10 +1607,13 @@ export default function ChatClient({ initialChats }:{ initialChats: (ChatSession
 
             {/* Dashboard Content */}
             <div className="flex-1 overflow-x-hidden overflow-y-auto px-6 py-8">
-              {loadingDashboard ? (
-                <div className="flex items-center justify-center h-64">
-                  <div className="text-gray-500">Loading dashboard data...</div>
-                </div>
+                {loadingDashboard ? (
+                  <div className="flex items-center justify-center h-64">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
+                      <div className="text-gray-500">Loading dashboard data...</div>
+                    </div>
+                  </div>
               ) : dashboardData ? (
                 <div className="max-w-7xl mx-auto space-y-8 w-full">
                   {/* Summary Cards */}

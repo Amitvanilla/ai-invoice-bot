@@ -38,7 +38,7 @@ export async function POST(
     // TODO: Implement actual Excel export
     // For now, return mock response
     const mockResponse = {
-      export_url: `https://example.com/exported-invoice-${invoiceId}.xlsx`,
+      export_url: `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/invoices/${invoiceId}/download?type=processed`,
       status: "success",
       message: `Invoice "${invoice.filename}" exported successfully`,
       invoice_data: {

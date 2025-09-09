@@ -3,7 +3,8 @@
 import "./globals.css";
 import Link from "next/link";
 import { ReactNode } from "react";
-import { LogOut, MessageCircle } from "lucide-react";
+import { LogOut } from "lucide-react";
+import InvoiceParserIcon from "../components/invoice-parser-icon";
 import { signOut, useSession, SessionProvider } from "next-auth/react";
 
 function Header() {
@@ -14,9 +15,9 @@ function Header() {
       <div className="max-w-7xl mx-auto flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3 font-bold text-xl text-gray-900 hover:text-gray-700 transition-colors">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <MessageCircle className="w-5 h-5 text-white" />
+            <InvoiceParserIcon className="w-5 h-5 text-white" />
           </div>
-          Amit Chat
+          Invoice Parser
         </Link>
 
         {session && (
@@ -52,6 +53,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <title>Invoice Parser</title>
         <script
           src={`https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js`}
         />

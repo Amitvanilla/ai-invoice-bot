@@ -8,7 +8,7 @@ OPTIMIZED AI FLOW:
 """
 
 import structlog
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -26,6 +26,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import numpy as np
 import gc
 import logging
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # Handle Excel import with fallback
 try:
@@ -44,10 +46,9 @@ os.environ['VISION_AGENT_API_KEY'] = os.getenv('VISION_AGENT_API_KEY')
 os.environ['ANTHROPIC_API_KEY'] = os.getenv('ANTHROPIC_API_KEY')
 
 # Azure OpenAI configuration
-AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT",
-                          "https://kusha-m2brls4n-eastus2.openai.azure.com/")
-AZURE_DEPLOYMENT = os.getenv("AZURE_DEPLOYMENT_NAME", "gpt-4.1-mini")
-AZURE_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", "REPLACE_WITH_YOUR_KEY_VALUE_HERE")
+AZURE_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
+AZURE_DEPLOYMENT = os.getenv("AZURE_DEPLOYMENT_NAME")
+AZURE_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 
 # Custom JSON encoder to handle NumPy types and Chunk objects
 class NumpyEncoder(json.JSONEncoder):
@@ -87,6 +88,120 @@ from .services.invoice_processor import InvoiceProcessor
 from .services.embeddings import EmbeddingService
 from .services.search import SearchService
 from .api.routes import invoices, auth
+
+def update_invoice_database_directly(invoice_id: str, extracted_data: dict, filename: str):
+    """
+    Directly update the database with extracted data using psycopg2
+    """
+    try:
+        print(f"\n🔍 DEBUG: Starting database update for invoice: {invoice_id}")
+        print(f"🔍 DEBUG: Input extracted_data keys: {list(extracted_data.keys()) if extracted_data else 'None'}")
+        print(f"🔍 DEBUG: Input extracted_data type: {type(extracted_data)}")
+        
+        # Extract the key data from the processed results
+        vendor_name = "Unknown Vendor"
+        total_amount = "0"
+        invoice_number = "Unknown"
+        
+        # Extract vendor name from CSV data
+        print(f"🔍 DEBUG: Checking vendor_info...")
+        if extracted_data.get("vendor_info") and len(extracted_data["vendor_info"]) > 0:
+            vendor_data = extracted_data["vendor_info"][0].get("data", "")
+            print(f"🔍 DEBUG: Vendor data: {vendor_data[:200]}...")
+            if "Vendor Name," in vendor_data:
+                vendor_match = vendor_data.split("Vendor Name,")[1].split("\n")[0].strip()
+                print(f"🔍 DEBUG: Vendor match: '{vendor_match}'")
+                if vendor_match and vendor_match != "UNKNOWN":
+                    vendor_name = vendor_match
+                    print(f"✅ DEBUG: Set vendor_name to: {vendor_name}")
+        else:
+            print(f"🔍 DEBUG: No vendor_info found or empty")
+        
+        # Extract total amount from CSV data
+        print(f"🔍 DEBUG: Checking payment_info...")
+        if extracted_data.get("payment_info") and len(extracted_data["payment_info"]) > 0:
+            payment_data = extracted_data["payment_info"][0].get("data", "")
+            print(f"🔍 DEBUG: Payment data: {payment_data[:200]}...")
+            if "Total Amount Due," in payment_data:
+                amount_match = payment_data.split("Total Amount Due,")[1].split("\n")[0].strip()
+                print(f"🔍 DEBUG: Amount match: '{amount_match}'")
+                if amount_match and amount_match != "UNKNOWN":
+                    total_amount = amount_match
+                    print(f"✅ DEBUG: Set total_amount to: {total_amount}")
+        else:
+            print(f"🔍 DEBUG: No payment_info found or empty")
+        
+        # Extract invoice number from CSV data
+        print(f"🔍 DEBUG: Checking invoice_details...")
+        if extracted_data.get("invoice_details") and len(extracted_data["invoice_details"]) > 0:
+            invoice_data = extracted_data["invoice_details"][0].get("data", "")
+            print(f"🔍 DEBUG: Invoice data: {invoice_data[:200]}...")
+            if "Invoice Number," in invoice_data:
+                invoice_match = invoice_data.split("Invoice Number,")[1].split("\n")[0].strip()
+                print(f"🔍 DEBUG: Invoice match: '{invoice_match}'")
+                if invoice_match and invoice_match != "UNKNOWN":
+                    invoice_number = invoice_match
+                    print(f"✅ DEBUG: Set invoice_number to: {invoice_number}")
+        else:
+            print(f"🔍 DEBUG: No invoice_details found or empty")
+        
+        print(f"🔄 Updating database directly for invoice: {invoice_id}")
+        print(f"📊 Final extracted data - Vendor: {vendor_name}, Amount: {total_amount}, Invoice #: {invoice_number}")
+        
+        # Connect to the database using the full URL
+        from .core.config import settings
+        conn = psycopg2.connect(settings.DATABASE_URL)
+        
+        with conn.cursor() as cursor:
+            # First, get the current extracted_data to preserve other fields
+            cursor.execute("SELECT \"extractedData\", \"embeddings\" FROM \"Invoice\" WHERE id = %s", (invoice_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                current_data = result[0] if result[0] else {}
+                current_embeddings = result[1] if result[1] else None
+                
+                # Extract embeddings from current_data if present and move to embeddings field
+                embeddings_json = current_embeddings
+                if current_data.get("embeddings") and isinstance(current_data["embeddings"], list):
+                    embeddings_json = json.dumps(current_data["embeddings"])
+                    # Remove embeddings from extracted_data
+                    current_data = {k: v for k, v in current_data.items() if k != "embeddings"}
+                
+                # Update the extracted_data with new values
+                updated_data = {
+                    **current_data,
+                    "vendor_name": vendor_name,
+                    "total_amount": total_amount,
+                    "invoice_number": invoice_number,
+                    "file_processed": True,
+                    "excel_generated": True,
+                    "status": "Successfully processed by AI"
+                }
+                
+                # Update the database with both extractedData and embeddings
+                if embeddings_json:
+                    cursor.execute(
+                        "UPDATE \"Invoice\" SET \"extractedData\" = %s, \"embeddings\" = %s, status = %s WHERE id = %s",
+                        (json.dumps(updated_data), embeddings_json, "processed", invoice_id)
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE \"Invoice\" SET \"extractedData\" = %s, status = %s WHERE id = %s",
+                        (json.dumps(updated_data), "processed", invoice_id)
+                    )
+                
+                conn.commit()
+                print(f"✅ Successfully updated database directly for invoice {invoice_id}")
+            else:
+                print(f"❌ Invoice {invoice_id} not found in database")
+                
+    except Exception as e:
+        print(f"❌ Error updating database directly: {e}")
+        # Don't raise the exception to avoid breaking the main processing flow
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
 # Global variable to store last processed file
 last_processed_file = None
@@ -246,7 +361,7 @@ def extract_invoice_data_with_landing_ai(pdf_path):
                     serializable_chunks.append(
                         f"<Chunk object: {str(chunk)[:200]}...>")
 
-        with open(raw_result_file, 'w') as f:
+        with open(raw_result_file, 'w', encoding='utf-8') as f:
             json.dump({
                 "results_count": len(results),
                 "results_type": str(type(results)),
@@ -259,7 +374,7 @@ def extract_invoice_data_with_landing_ai(pdf_path):
         # Also save markdown to a separate file for easy reading
         markdown_file = os.path.join(logs_dir,
                                     f"{log_file_base}_landing_ai_markdown.md")
-        with open(markdown_file, 'w') as f:
+        with open(markdown_file, 'w', encoding='utf-8') as f:
             f.write(markdown_data)
         print(f"Saved Landing AI markdown to: {markdown_file}")
 
@@ -274,8 +389,8 @@ def extract_invoice_data_with_landing_ai(pdf_path):
         # Save processed data
         processed_data_file = os.path.join(logs_dir,
                                           f"{log_file_base}_processed_data.json")
-        with open(processed_data_file, 'w') as f:
-            json.dump(result_data, f, indent=2, cls=NumpyEncoder)
+        with open(processed_data_file, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, indent=2, cls=NumpyEncoder, ensure_ascii=False)
         print(f"Saved processed data to: {processed_data_file}")
 
         return result_data
@@ -336,7 +451,7 @@ def convert_landing_ai_to_invoice_format(markdown_data, chunks_data):
         # Log the input data for debugging
         input_debug_file = os.path.join(
             logs_dir, f"{log_file_base}_input_debug.json")
-        with open(input_debug_file, 'w') as f:
+        with open(input_debug_file, 'w', encoding='utf-8') as f:
             json.dump({
                 "markdown_length": len(markdown_data) if markdown_data else 0,
                 "chunks_count": len(chunks_data) if chunks_data else 0,
@@ -451,7 +566,7 @@ Return ONLY valid JSON with NO explanatory text."""
         # Save Claude's response for debugging
         claude_response_file = os.path.join(logs_dir,
                                            f"{log_file_base}_claude_response.txt")
-        with open(claude_response_file, 'w') as f:
+        with open(claude_response_file, 'w', encoding='utf-8') as f:
             f.write(response.content[0].text)
         print(f"Saved Claude response to: {claude_response_file}")
 
@@ -475,8 +590,8 @@ Return ONLY valid JSON with NO explanatory text."""
             # Save parsed result for debugging
             claude_parsed_file = os.path.join(logs_dir,
                                              f"{log_file_base}_claude_parsed.json")
-            with open(claude_parsed_file, 'w') as f:
-                json.dump(claude_result, f, indent=2, cls=NumpyEncoder)
+            with open(claude_parsed_file, 'w', encoding='utf-8') as f:
+                json.dump(claude_result, f, indent=2, cls=NumpyEncoder, ensure_ascii=False)
             print(f"Saved Claude parsed result to: {claude_parsed_file}")
 
             # Validate and clean the result
@@ -717,7 +832,7 @@ Return ONLY valid JSON with NO explanatory text."""
         # Save OpenAI response for debugging
         openai_response_file = os.path.join(logs_dir,
                                            f"{log_file_base}_openai_response.txt")
-        with open(openai_response_file, 'w') as f:
+        with open(openai_response_file, 'w', encoding='utf-8') as f:
             f.write(response.choices[0].message.content
                    if response.choices[0].message.content else "EMPTY RESPONSE")
         print(f"Saved OpenAI response to: {openai_response_file}")
@@ -775,8 +890,8 @@ Return ONLY valid JSON with NO explanatory text."""
         # Log the evaluation result
         eval_result_file = os.path.join(logs_dir,
                                        f"{log_file_base}_result.json")
-        with open(eval_result_file, 'w') as f:
-            json.dump(corrected_result, f, indent=2, cls=NumpyEncoder)
+        with open(eval_result_file, 'w', encoding='utf-8') as f:
+            json.dump(corrected_result, f, indent=2, cls=NumpyEncoder, ensure_ascii=False)
 
         # Verify the corrected result has the required structure
         if not isinstance(corrected_result, dict):
@@ -928,7 +1043,7 @@ def create_invoice_analysis_excel(invoice_data, output_path):
         # Fallback: create a simple text file
         try:
             text_path = output_path.replace('.xlsx', '.txt')
-            with open(text_path, 'w') as f:
+            with open(text_path, 'w', encoding='utf-8') as f:
                 f.write("Invoice Analysis Report\n")
                 f.write("=" * 50 + "\n\n")
                 f.write(f"Error: {str(e)}\n")
@@ -1043,7 +1158,10 @@ app.include_router(invoices.router, prefix="/api/v1", tags=["Invoices"])
 
 
 @app.post("/parse-invoices")
-async def parse_invoice_documents(pdf_files: list[UploadFile] = File(...)):
+async def parse_invoice_documents(
+    pdf_files: list[UploadFile] = File(...),
+    invoice_id: str = Form(None)
+):
     """
     Main endpoint that uses Landing AI to parse invoice documents and extract
     comprehensive invoice information using the AI pipeline.
@@ -1110,8 +1228,12 @@ async def parse_invoice_documents(pdf_files: list[UploadFile] = File(...)):
                 print(f"Processing {doc_name} with Landing AI AI pipeline")
                 gc.collect()
 
-                # Generate a unique ID for this invoice
-                invoice_id = str(uuid.uuid4())
+                # Use provided invoice_id or generate a new one if not provided
+                if not invoice_id:
+                    invoice_id = str(uuid.uuid4())
+                    print(f"⚠️ No invoice_id provided, generated new one: {invoice_id}")
+                else:
+                    print(f"✅ Using provided invoice_id: {invoice_id}")
 
                 # Save original file to originals directory
                 originals_dir = os.path.join(os.getcwd(), "originals")
@@ -1273,6 +1395,10 @@ Return a consolidated JSON with the same structure but with validated, combined 
                 )
                 # Add invoice ID to response headers for Next.js to correlate
                 response.headers["X-Invoice-ID"] = invoice_id
+                
+                # Update database directly with extracted data
+                update_invoice_database_directly(invoice_id, combined_invoice_data, pdf_files[0].filename)
+                
                 return response
             # Check if text file was created as fallback
             elif os.path.exists(excel_path.replace('.xlsx', '.txt')):
@@ -1486,7 +1612,7 @@ async def shutdown_event():
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
-        host="0.0.0.0",
+        host=os.getenv("HOST", "0.0.0.0"),
         port=settings.PORT,
         reload=settings.DEBUG,
         log_level="info"

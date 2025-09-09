@@ -7,9 +7,18 @@ PORT=8001
 SECRET_KEY=your-secret-key-here
 
 # CORS
-ALLOWED_ORIGINS=["http://localhost:3000", "http://127.0.0.1:3000"]
+ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# Server
+HOST=0.0.0.0
+
+# Next.js Integration
+NEXTAUTH_URL=http://localhost:3000
 
 # Database
+DATABASE_URL=postgresql://neondb_owner:npg_ZdlPyoGDm81X@ep-crimson-water-adc26d0j-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+
+# Alternative individual database parameters (if needed)
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_USER=postgres
@@ -27,6 +36,11 @@ CLAUDE_MODEL=claude-3-sonnet-20240229
 # OpenAI (fallback for classification)
 OPENAI_API_KEY=your-openai-api-key
 OPENAI_MODEL=gpt-4-turbo-preview
+
+# Azure OpenAI
+AZURE_OPENAI_ENDPOINT=your-azure-openai-endpoint
+AZURE_DEPLOYMENT_NAME=your-deployment-name
+AZURE_OPENAI_API_KEY=your-azure-openai-api-key
 
 # AWS S3
 AWS_ACCESS_KEY_ID=your-aws-access-key

@@ -235,5 +235,5 @@ function extractCategories(extractedData: any): string[] {
     });
   }
 
-  return [...new Set(categories)]; // Remove duplicates
+  return Array.from(new Set(categories)); // Remove duplicates
 }

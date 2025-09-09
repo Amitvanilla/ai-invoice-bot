@@ -2,10 +2,11 @@
 Application configuration settings
 """
 
+import os
 import secrets
 from typing import List
 from pydantic_settings import BaseSettings
-from pydantic import validator
+from pydantic import validator, Field
 
 
 class Settings(BaseSettings):
@@ -17,18 +18,17 @@ class Settings(BaseSettings):
     PORT: int = 8001
 
     # CORS
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    ALLOWED_ORIGINS: List[str] = Field(
+        default_factory=lambda: os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    )
 
     # Database
+    DATABASE_URL: str = Field(default="postgresql://postgres:password@localhost:5432/invoices")
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "password"
     POSTGRES_DB: str = "invoices"
-
-    @property
-    def DATABASE_URL(self) -> str:
-        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
 
     # Landing AI
     LANDING_AI_API_KEY: str = ""

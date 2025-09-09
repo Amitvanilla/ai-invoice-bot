@@ -1,5 +1,5 @@
 {
-  "name": "chatbot-starter",
+  "name": "invoice-parser",
   "private": true,
   "scripts": {
     "dev": "next dev",

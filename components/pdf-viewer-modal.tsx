@@ -24,30 +24,63 @@ export default function PDFViewerModal({
   const [scale, setScale] = useState(1.0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useFallback, setUseFallback] = useState(false);
+
+  // Debug logging
+  console.log('🔍 PDFViewerModal props:', { isOpen, pdfUrl, filename });
+  console.log('🔍 PDFViewerModal state:', { numPages, pageNumber, scale, loading, error, useFallback });
 
   // Configure PDF.js worker (only in browser)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+      try {
+        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
+        console.log('PDF Modal: PDF.js worker configured');
+        
+        // Test if PDF.js is available
+        if (typeof pdfjs.getDocument === 'function') {
+          console.log('PDF Modal: PDF.js getDocument function available');
+        } else {
+          console.error('PDF Modal: PDF.js getDocument function not available');
+        }
+      } catch (error) {
+        console.error('PDF Modal: Error configuring PDF.js worker:', error);
+      }
     }
   }, []);
 
   useEffect(() => {
     if (isOpen && pdfUrl) {
       console.log('PDF Modal: Opening with URL:', pdfUrl);
+      console.log('PDF Modal: Filename:', filename);
       setPageNumber(1);
       setScale(1.0);
       setError(null);
       setLoading(true);
 
+      // Test if the URL is accessible
+      fetch(pdfUrl, { method: 'HEAD' })
+        .then(response => {
+          console.log('PDF Modal: URL accessibility test:', response.status, response.statusText);
+          if (!response.ok) {
+            setError(`PDF not accessible: ${response.status} ${response.statusText}`);
+            setLoading(false);
+          }
+        })
+        .catch(error => {
+          console.error('PDF Modal: URL accessibility test failed:', error);
+          setError(`PDF not accessible: ${error.message}`);
+          setLoading(false);
+        });
+
       // Set a timeout to detect if PDF loading is taking too long
       const timeoutId = setTimeout(() => {
-        if (loading) {
-          console.warn('PDF Modal: Loading timeout reached');
-          setError('PDF is taking too long to load. Try downloading it instead.');
+        if (loading && !useFallback) {
+          console.warn('PDF Modal: Loading timeout reached, switching to iframe');
+          setUseFallback(true);
           setLoading(false);
         }
-      }, 30000); // 30 second timeout
+      }, 10000); // 10 second timeout
 
       return () => clearTimeout(timeoutId);
     }
@@ -75,6 +108,9 @@ export default function PDFViewerModal({
       setError('Network error. Please check your connection and try again.');
     } else if (error.message.includes('InvalidPDFException') || error.message.includes('corrupt')) {
       setError('PDF file appears to be corrupted or invalid.');
+    } else if (error.message.includes('Worker') || error.message.includes('pdfjs')) {
+      setError('PDF.js library error. Trying fallback viewer...');
+      setUseFallback(true);
     } else {
       setError(`Failed to load PDF: ${error.message}`);
     }
@@ -86,11 +122,10 @@ export default function PDFViewerModal({
     if (onDownload) {
       onDownload();
     } else if (pdfUrl) {
-      // Download Excel analysis instead of PDF
-      const excelUrl = pdfUrl.replace('/download?type=original', '/download?type=processed');
+      // Download the PDF file
       const link = document.createElement('a');
-      link.href = excelUrl;
-      link.download = filename.replace('.pdf', '.xlsx');
+      link.href = pdfUrl;
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -166,15 +201,29 @@ export default function PDFViewerModal({
               </>
             )}
 
+            {/* Viewer Toggle Button */}
+            <div className="w-px h-6 bg-gray-300 mx-2" />
+            <button
+              onClick={() => setUseFallback(!useFallback)}
+              className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded transition-colors ${
+                useFallback 
+                  ? 'bg-green-600 text-white hover:bg-green-700' 
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+              title={useFallback ? "Switch to PDF.js viewer" : "Switch to iframe viewer"}
+            >
+              {useFallback ? 'PDF.js' : 'Iframe'}
+            </button>
+
             {/* Download Button */}
             <div className="w-px h-6 bg-gray-300 mx-2" />
             <button
               onClick={handleDownload}
               className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 transition-colors"
-              title="Download Excel Analysis"
+              title="Download PDF"
             >
               <Download className="w-4 h-4" />
-              Download Excel
+              Download PDF
             </button>
 
             {/* Close Button */}
@@ -206,53 +255,14 @@ export default function PDFViewerModal({
                   <X className="w-16 h-16 mx-auto" />
                 </div>
                 <p className="text-red-600 font-medium mb-2">Error Loading PDF</p>
-                <p className="text-gray-600">{error}</p>
-                <button
-                  onClick={() => window.location.reload()}
-                  className="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                >
-                  Retry
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!loading && !error && pdfUrl && (
-            <div className="flex justify-center">
-              <Document
-                file={pdfUrl}
-                onLoadSuccess={onDocumentLoadSuccess}
-                onLoadError={onDocumentLoadError}
-                loading={
-                  <div className="flex items-center justify-center py-20">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                  </div>
-                }
-              >
-                <Page
-                  pageNumber={pageNumber}
-                  scale={scale}
-                  loading={
-                    <div className="flex items-center justify-center py-20">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                    </div>
-                  }
-                />
-              </Document>
-            </div>
-          )}
-
-          {error && (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center">
-                <div className="text-red-500 mb-4">
-                  <X className="w-16 h-16 mx-auto" />
-                </div>
-                <p className="text-red-600 font-medium mb-2">Error Loading PDF</p>
                 <p className="text-gray-600 mb-4">{error}</p>
                 <div className="flex flex-wrap gap-2 justify-center">
                   <button
-                    onClick={() => window.location.reload()}
+                    onClick={() => {
+                      setError(null);
+                      setLoading(true);
+                      // Retry loading the PDF
+                    }}
                     className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                   >
                     Retry PDF Load
@@ -263,7 +273,7 @@ export default function PDFViewerModal({
                       const excelUrl = pdfUrl?.replace('/download?type=original', '/download?type=processed') || '';
                       const link = document.createElement('a');
                       link.href = excelUrl;
-                      link.download = pdfFilename?.replace('.pdf', '.xlsx') || 'invoice_analysis.xlsx';
+                      link.download = filename?.replace('.pdf', '.xlsx') || 'invoice_analysis.xlsx';
                       document.body.appendChild(link);
                       link.click();
                       document.body.removeChild(link);
@@ -280,6 +290,106 @@ export default function PDFViewerModal({
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {!loading && !error && pdfUrl && (
+            <div className="flex justify-center">
+              {useFallback ? (
+                // Fallback iframe viewer
+                <div className="w-full h-full">
+                  <div className="mb-4 text-center">
+                    <p className="text-sm text-gray-600 mb-2">Using fallback PDF viewer</p>
+                    <button
+                      onClick={() => setUseFallback(false)}
+                      className="px-3 py-1 text-xs bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                    >
+                      Try PDF.js again
+                    </button>
+                  </div>
+                  <iframe
+                    src={pdfUrl}
+                    className="w-full h-full border-0"
+                    title={filename}
+                    onLoad={() => {
+                      console.log('PDF Modal: Iframe loaded successfully');
+                      setLoading(false);
+                    }}
+                    onError={() => {
+                      console.error('PDF Modal: Iframe load error');
+                      setError('Unable to load PDF in iframe. Please try downloading the file.');
+                      setLoading(false);
+                    }}
+                  />
+                </div>
+              ) : (
+                // PDF.js viewer
+                <Document
+                  file={pdfUrl}
+                  onLoadSuccess={onDocumentLoadSuccess}
+                  onLoadError={onDocumentLoadError}
+                  loading={
+                    <div className="flex items-center justify-center py-20">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                      <p className="ml-2 text-gray-600">Loading PDF...</p>
+                    </div>
+                  }
+                  onLoadStart={() => {
+                    console.log('PDF Modal: Document loading started');
+                  }}
+                  onLoadProgress={(progress) => {
+                    console.log('PDF Modal: Loading progress:', progress);
+                  }}
+                  error={
+                    <div className="flex items-center justify-center py-20">
+                      <div className="text-center">
+                        <div className="text-red-500 mb-4">
+                          <X className="w-16 h-16 mx-auto" />
+                        </div>
+                        <p className="text-red-600 font-medium mb-2">PDF Viewer Error</p>
+                        <p className="text-gray-600 mb-4">Unable to load PDF viewer. PDF.js may not be available.</p>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          <button
+                            onClick={() => setUseFallback(true)}
+                            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+                          >
+                            Try Fallback Viewer
+                          </button>
+                          <button
+                            onClick={handleDownload}
+                            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                          >
+                            Download PDF
+                          </button>
+                          <button
+                            onClick={() => window.open(pdfUrl, '_blank')}
+                            className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+                          >
+                            Open in Browser
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  }
+                >
+                  <Page
+                    pageNumber={pageNumber}
+                    scale={scale}
+                    loading={
+                      <div className="flex items-center justify-center py-20">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                        <p className="ml-2 text-gray-600">Rendering page...</p>
+                      </div>
+                    }
+                    onLoadSuccess={() => {
+                      console.log('PDF Modal: Page loaded successfully');
+                    }}
+                    onLoadError={(error) => {
+                      console.error('PDF Modal: Page load error:', error);
+                    }}
+                  />
+                </Document>
+              )}
             </div>
           )}
         </div>

@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { MessageCircle } from "lucide-react";
+import InvoiceParserIcon from "../../components/invoice-parser-icon";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -14,9 +14,9 @@ export default function LoginPage() {
         <div className="text-center mb-12">
           <div className="flex items-center justify-center gap-2 mb-6">
             <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
-              <MessageCircle className="w-5 h-5 text-white" />
+              <InvoiceParserIcon className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold text-black">AI-Bot</span>
+            <span className="text-xl font-bold text-black">Invoice Parser</span>
           </div>
         </div>
 
